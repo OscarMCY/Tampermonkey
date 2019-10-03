@@ -9,9 +9,14 @@ A simple tampermonkey util to download PDF files on [CNKI](www.cnki.net).
 
 ## 版本
 
-当前版本：v1.0.2
+当前版本：v1.0.3
 
 ## 更新日志
+
+
+### v1.0.3
+
+增加了主页信息
 
 ### v1.0.2
 
