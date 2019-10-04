@@ -13,6 +13,11 @@ A simple tampermonkey util to download PDF files on [CNKI](www.cnki.net).
 
 ## 更新日志
 
+### v1.1.0
+- 大量优化了代码
+- 搜索页面改变了默认下载图标显示
+- 更改了博硕士论文的图标显示形式
+- 移除了对知网以外平台的支持
 
 ### v1.0.3
 
