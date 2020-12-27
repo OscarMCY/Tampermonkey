@@ -1,175 +1,114 @@
 // ==UserScript==
 // @id             CNKI_PDF_Supernova
 // @name           知网PDF下载助手
-// @version        2.4.1
+// @version        3.3.4
 // @namespace      https://github.com/supernovaZhangJiaXing/Tampermonkey/
 // @author         Supernova
-// @description    直接以PDF格式下载知网上的文献, 包括期刊论文和博硕士论文
+// @description    直接以PDF格式从知网下载期刊论文和博硕士论文; 下载博士论文目录
 // @include        http*://*.cnki.net/*
 // @include        http*://*.cnki.net.*/*
+// @include        */DefaultResult/Index*
+// @include        */KNS8/AdvSearch*
+// @include        */detail.aspx*
+// @include        */CatalogViewPage.aspx*
+// @include        */Article/*
 // @include        */kns/brief/*
 // @include        */kns55/brief/*
 // @include        */grid2008/brief/*
 // @include        */detail/detail.aspx*
 // @exclude        http://image.cnki.net/*
 // @run-at         document-idle
-// @grant          none
+// @grant          unsafeWindow
+// @grant          GM_setClipboard
+// @grant          GM_xmlhttpRequest
+// @license        MIT
 // ==/UserScript==
 
-(function() {
-    'use strict';
-    window.onload = function(){
-        var isDetailPage = false;
-        var isCNKIPage = false;
-        var myurl = window.location.href;
+'use strict';
+var $ = unsafeWindow.jQuery;
+var contents = '';
+var pdf;
 
-        // isDetailPage: 点进文献后的详情页
-        if (myurl.indexOf("detail.aspx") != -1) {
-            isDetailPage = true;
-        }
-        // isNewPage: 是知网页面(谁从杂牌网站下载(╯‵□′)╯︵┻━┻)
-        if (document.title.indexOf(" - 中国知网") != -1) {
-            isCNKIPage = true;
-        }
+$(document).ready(function() {
+    var myurl = window.location.href;
+    var isDetailPage = myurl.indexOf("detail.aspx") != -1 ? true: false; // 点进文献后的详情页
+    var isContentPage = myurl.indexOf("kdoc/download.aspx?") != -1 ? true : false; // 分章下载
 
-        // 查找所有链接的XPath
-        var allLinks;
-
-        // 如果不是详情页, 即在搜索页面直接点右面的下载图标, 把点击后发送的get请求的dflag参数内容改为"pdfdown"就可以了(知网老贼你以为隐藏起来我就找不到了?)
-        if (isDetailPage === false) {
-            if (window.location.href.indexOf("kns8") != -1){ // 文献检索页面, 防止在别处出现
-                // 加一个转换下载方式的按钮
-                var thisLink;
-                // 浮动框
-                var float_box = document.createElement("div");
-                float_box.style = "position: fixed ; right: 20px; top: 50px; width: 200px; text-align: center; border: dashed; padding: 10px; background-color: cyan";
-                document.getElementsByTagName("body")[0].insertAdjacentElement("afterbegin", float_box);
-                // 勾选框
-                var change_type = document.createElement("button");
-                change_type.innerText = "转换为默认下载PDF";
-                change_type.id = "change_type";
-                change_type.style = "font-size:150%;";
-                change_type.onclick = function() {
-                    allLinks = document.evaluate(
-                        '//a[@title="下载"]',
-                        document,
-                        null,
-                        XPathResult.UNORDERED_NODE_SNAPSHOT_TYPE,
-                        null);
-                    for (var i = 0; i < allLinks.snapshotLength; i++) {
-                        thisLink = allLinks.snapshotItem(i);
-                        if (thisLink.href && thisLink.href.indexOf("download.aspx?filename=") != -1 && thisLink.href.indexOf("&dflag") == -1) {
-                            thisLink.href = thisLink.href + "&dflag=pdfdown";
-                        } else if (thisLink.href && thisLink.href.indexOf("download.aspx?filename=") != -1 && thisLink.href.indexOf("&dflag=nhdown") != -1) {
-                            thisLink.href = thisLink.href.replace("nhdown", "pdfdown");
-                        } else {
-                            thisLink.href = "https://kns.cnki.net/kcms/download.aspx?" + thisLink.href.substr(thisLink.href.indexOf("filename=")) + "&dflag=pdfdown";
-                        }
+    if (isDetailPage === false) {
+        if (window.location.href.indexOf("kns8") != -1){
+            $(document).ajaxSuccess(function(event, xhr, settings) {
+                if (settings.url.indexOf('/Brief/GetGridTableHtml') + 1 || settings.url.indexOf('request/GetWebGroupHandler.ashx') + 1) {
+                    var down_btns = $('.downloadlink');
+                    for (var i = 0; i < down_btns.length; i++) {
+                        down_btns.eq(i).after(down_btns.eq(i).clone().attr('href', toPDF).css('background-color', '#C7FFC7').mouseover(function(e){
+                            this.title="PDF下载";
+                        })).css('background-color', '#C7FFFF').mouseover(function(e){
+                            this.title="CAJ下载";
+                        });
                     }
-                    change_type.innerText = "√ 已转换: 默认下载PDF";
-                };
-                float_box.insertAdjacentElement("beforeend", change_type);
-            }
-        }
-        // 如果进了详情页, 博硕士论文下面会出现五个个按钮: 手机, 整本, 分页, 分章, 在线
-        // 期刊论文下会有三个按钮
-        else {
-            // 只对"博硕论文"详情页做优化, 否则影响期刊页面的显示
-            // 新版界面更改了详情页的显示方式, 原本的"博硕论文"四个大字没有了, 只能数按钮数量了
-            var operate_buttons = document.getElementsByClassName("operate-btn")[0];
-            if (isCNKIPage === true && operate_buttons.childNodes[3].innerText == "整本下载") {
-                // 整本下载替换为CAJ下载
-                var dlcaj = document.getElementsByClassName("btn-dlcaj")[0];
-                dlcaj.innerHTML = dlcaj.innerHTML.replace("整本", "CAJ");
-                // 新增PDF下载的按钮
-                var dlpdf = document.getElementsByClassName("btn-dlpdf")[0]; // 从分页下载获取链接
-                var pdfdown = dlpdf.getElementsByTagName('a');
-                var dl = pdfdown[0].href.replace("&dflag=downpage", "&dflag=pdfdown");
-                var li = document.createElement('li');
-                li.className = "btn-dlpdf";
-                var a = document.createElement('a');
-                a.innerHTML = "<i></i>PDF 下载";
-                a.target="_blank";
-                a.id = "pdfDown";
-                a.name = "pdfDown";
-                a.href = dl;
-                li.appendChild(a);
-                operate_buttons.appendChild(li);
-                operate_buttons.insertBefore(li, dlcaj.nextElementSibling);
-
-                // 分页下载替换为目录复制
-                dlpdf.innerHTML = dlpdf.innerHTML.replace("分页下载", "目录复制");
-                dlpdf.className = "btn-dlcaj";
-                pdfdown[0].removeAttribute("href");
-                pdfdown[0].removeAttribute("target");
-                pdfdown[0].removeAttribute("onclick");
-                pdfdown[0].id = "copyContents";
-                pdfdown[0].name = "copyContents";
-                pdfdown[0].removeChild(pdfdown[0].childNodes[0]);
-                dlpdf.onclick = function() {
-                    var catalog_list = document.getElementsByClassName("catalog-list")[0];
-                    var contents = "";
-                    for (var i = 0; i < catalog_list.childElementCount; i++){
-                        contents = contents + catalog_list.children[i].innerText + "\r\n";
-                    }
-                    // 利用隐藏textArea实现复制
-                    const textarea = document.createElement('textarea');
-                    operate_buttons.appendChild(textarea);
-                    textarea.setAttribute('readonly', 'readonly');
-                    textarea.value = contents; // 这里应该用value，不用innerText
-                    textarea.select();
-                    if (document.execCommand('copy')) {
-                        document.execCommand('copy');
-                        window.alert('目录已复制到剪贴板');
-                    }
-                    operate_buttons.removeChild(textarea);
-                };
-                // 分章下载替换为目录下载
-                var dlChapter = document.getElementsByClassName("btn-dlcaj")[2];
-                dlChapter.className = "btn-dlpdf";
-                var dlChapter_link = dlChapter.childNodes[0];
-                dlChapter_link.removeChild(dlChapter_link.childNodes[0]);
-                dlChapter.innerHTML = dlChapter.innerHTML.replace("分章", "目录");
-            }
-        }
-
-        // 下面是在目录页面加一个下载按钮
-        if (myurl.includes("kdoc")) {
-            var title = document.getElementsByClassName("DBlueText")[0];
-            var downCnt = document.createElement("button");
-            downCnt.innerHTML = "下载目录索引";
-            downCnt.id = "downCnt";
-            downCnt.style = "height: 32px; padding: 0 15px; background-color: #1890ff; border-color: #1890ff; color: #fff; font-size: 14px; border-radius: 4px; text-shadow: 0 -1px 0 rgba(0,0,0,0.12); box-shadow: 0 2px 0 rgba(0,0,0,0.045); margin: 10px";
-            downCnt.onclick = function() {
-                var cnt_list = document.getElementById("downCnt").nextSibling.nextSibling.childNodes[1].childNodes; // 加了一句说明, 再取一个.nextSibling才是目录
-                // 要写的内容
-                var contents = "";
-                for (var i = 0; i < cnt_list.length - 1; i++) { // 长度减一, 因为最后一个是text(???这又是什么神仙操作)
-                    var cnt_item = cnt_list[i].childNodes[1].childNodes[1];
-                    cnt_item = cnt_item.innerHTML;
-                    var cnt_page = cnt_list[i].childNodes[3].childNodes[0].textContent.trim().split("-")[0]; // 知网的目录给的是个范围, 正常只需要前半部分
-                    contents = contents + cnt_item.trim().replace(/&nbsp;/g, " ") + "\t" + cnt_page + "\r\n";
                 }
-                var data = new Blob([contents],{type:"text/plain; charset=UTF-8"});
-                var downloadUrl = window.URL.createObjectURL(data);
-                var anchor = document.createElement("a");
-                anchor.href = downloadUrl;
-                anchor.download = "目录索引_" + title.innerHTML.trim().replace(/&nbsp;/g, "");
-                anchor.click();
-                window.URL.revokeObjectURL(data);
-                window.alert("目录索引已保存, 请使用FreePic2Pdf软件将目录整合到PDF中");
-            };
-            var info = document.createElement("div");
-            info.style = "font-size:120%; margin: 15px;";
-            info.innerText = "索引文件的使用说明见此";
-            var manual = document.createElement("a");
-            manual.href = "https://zhuanlan.zhihu.com/p/237574559";
-            manual.style = "color: blue";
-            manual.innerText = "链接";
-            manual.target="_blank";
-            info.insertAdjacentElement("beforeend", manual);
-            title.parentElement.insertBefore(downCnt, title.nextElementSibling);
-            downCnt.parentElement.insertBefore(info, downCnt.nextElementSibling);
+                $('th').eq(8).css('width', '12%')
+            });
         }
-    };
-})();
+    }
+    else {
+        // 只对"博硕论文"详情页做优化, 否则影响期刊页面的显示
+        // 来自: https://greasyfork.org/zh-CN/scripts/371938
+        if (location.search.match(/dbcode=C[DM][FM]D&/i)) {
+            // 整本下载替换为CAJ下载
+            $(".btn-dlcaj").first().html($(".btn-dlcaj").first().html().replace("整本", "CAJ"));
+            // pdf文件的url
+            var pdf_url = $(".btn-dlpdf").remove().find("a").attr("href").replace("&dflag=downpage", "&dflag=pdfdown");
+            // 添加PDF下载
+            var pdf_down = $('<li class="btn-dlpdf"><a href=' + pdf_url + ' id="pdfDown" target="_blank" name = "pdfDown"><i></i>PDF下载</a></li>');
+            $(".btn-dlcaj").first().after(pdf_down);
+            // 从分章下载获取目录的URL
+            var content_url = $(".btn-dlcaj:eq(1)").find("a").attr("href") || '?';
+            content_url = 'https://chn.oversea.cnki.net/kcms/download.aspx' + content_url.match(/\?.*/)[0];
+            GM_xmlhttpRequest({method: 'GET', url: content_url, onload: manage_contents});
+            // 右侧添加使用说明
+            $(".operate-btn").append($('<li class="btn-phone"><a target="_blank" '
+                                       + 'href="https://mp.weixin.qq.com/s?__biz=MzU5MTY4NDUzMg==&mid=2247484384'
+                                       + '&idx=1&sn=6a135e824793d26b5bd8884b78c1f751&chksm=fe2a753bc95dfc2d3a5f6'
+                                       + '383553fc369894c5021619c85bb7554583bdcb8c10624bf2a7097e1&token=462651491&lang=zh_CN#rd">脚本说明</a></li>'));
+            // 右侧底部添加工具下载(PdgContentEditor)
+            $(".opts-down").append($('<div class="fl info" style="font-size: 13px; border-left: 1px solid #ddd;"><p class="total-inform" style="margin-left: 3px">'
+                                     + '<span><a href="https://pan.baidu.com/s/1VoJlEqPnPN8H6oklAZ0bGQ" target="_blank">点击下载目录合并软件及说明</a><br />提取码: y77f</span>'))
+        }
+    }
+});
+
+// 来自: https://greasyfork.org/zh-CN/scripts/371938
+function toPDF() {
+    return $(this).data('PDF', this.href.replace(/&dflag=\w*|$/, '&dflag=pdfdown')).data("PDF");
+}
+
+function get_content(cnt_list){
+    var contents = "";
+    for (var i = 0; i < cnt_list.length - 1; i++) { // 长度减一, 因为最后一个是text
+        var cnt_item = cnt_list[i].childNodes[1].childNodes[1];
+        cnt_item = cnt_item.innerHTML;
+        var cnt_page = cnt_list[i].childNodes[3].childNodes[0].textContent.trim().split("-")[0]; // 知网的目录给的是个范围, 正常只需要前半部分
+        contents = contents + cnt_item.trim().replace(/&nbsp;/g, " ").replace(/ {4}/g, "\t") + "\t" + cnt_page + "\r\n";
+    }
+    return contents;
+}
+
+// 来自: https://greasyfork.org/zh-CN/scripts/371938
+function manage_contents(xhr) {
+    var cnt_list = $('tr', xhr.responseText); // 目录列表
+    var contents = get_content(cnt_list); // 目录内容
+    // 添加目录复制
+    $('.btn-dlpdf').first().after($('<li class="btn-dlpdf"><a href="javascript:void(0);">目录复制</a></li>').click(function() {
+        GM_setClipboard(contents); // 运用油猴脚本自带的复制函数
+        window.alert('目录已复制到剪贴板');
+    }));
+    // 添加目录下载
+    $('.btn-dlpdf').first().after($('<li class="btn-dlcaj"><a>目录下载</a></li>').click(function() {
+        var data = new Blob([contents],{type:"text/plain; charset=UTF-8"});
+        $(this).find('a').attr("download", '目录_' + $('.wx-tit h1:first-child()').text().trim() + '.txt');
+        $(this).find('a').attr("href", window.URL.createObjectURL(data));
+        window.URL.revokeObjectURL(data);
+        window.alert("目录索引已保存, 请使用PdgCntEditor软件将目录整合到PDF中");
+    }));
+}
