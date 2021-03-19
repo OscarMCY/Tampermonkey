@@ -1,13 +1,14 @@
 // ==UserScript==
 // @id             CNKI_PDF_Supernova
 // @name           知网PDF下载助手
-// @version        3.3.4
+// @version        3.4.1
 // @namespace      https://github.com/supernovaZhangJiaXing/Tampermonkey/
 // @author         Supernova
 // @description    直接以PDF格式从知网下载期刊论文和博硕士论文; 下载博士论文目录
 // @include        http*://*.cnki.net/*
 // @include        http*://*.cnki.net.*/*
 // @include        */DefaultResult/Index*
+// @include        */defaultresult/index*
 // @include        */KNS8/AdvSearch*
 // @include        */detail.aspx*
 // @include        */CatalogViewPage.aspx*
@@ -35,9 +36,10 @@ $(document).ready(function() {
     var isContentPage = myurl.indexOf("kdoc/download.aspx?") != -1 ? true : false; // 分章下载
 
     if (isDetailPage === false) {
-        if (window.location.href.indexOf("kns8") != -1){
+        // 对应普通检索和高级检索
+        if (window.location.href.indexOf("kns8") != -1 || window.location.href.indexOf("KNS8") != -1){
             $(document).ajaxSuccess(function(event, xhr, settings) {
-                if (settings.url.indexOf('/Brief/GetGridTableHtml') + 1 || settings.url.indexOf('request/GetWebGroupHandler.ashx') + 1) {
+                if (settings.url.indexOf('/Brief/GetGridTableHtml') + 1) {
                     var down_btns = $('.downloadlink');
                     for (var i = 0; i < down_btns.length; i++) {
                         down_btns.eq(i).after(down_btns.eq(i).clone().attr('href', toPDF).css('background-color', '#C7FFC7').mouseover(function(e){
@@ -46,8 +48,20 @@ $(document).ready(function() {
                             this.title="CAJ下载";
                         });
                     }
+                    // 在后面新增一个批量下载按钮, 功能为下载pdf格式论文
+                    $('.bulkdownload.export').eq(0).after($('.bulkdownload.export').eq(0).clone().html($('.bulkdownload.export').eq(0).html().replace('下载', 'PDF'))
+                                                          .removeClass('bulkdownload').click(function () { // 点击下载按钮后的行为
+                        // 获取到勾选的文献, 下载其pdf版
+                        var down_btns = $('.downloadlink');
+                        for (var i = 0; i < $('input.cbItem').length; i++) {
+                            if ($('input.cbItem').eq(i).attr('checked') == 'checked') { // 只针对勾选中的i
+                                window.setTimeout(window.open(down_btns.eq(2 * i + 1).attr('href'), '_blank'), 500);
+                            }
+                        }
+                        $.filenameClear();
+                    }).css('background-color', '#C7FFC7')).css('background-color', '#C7FFFF').html($('.bulkdownload.export').eq(0).html().replace('下载', 'CAJ'))
                 }
-                $('th').eq(8).css('width', '12%')
+                $('th').eq(8).css('width', '12%');
             });
         }
     }
@@ -77,6 +91,19 @@ $(document).ready(function() {
         }
     }
 });
+
+// 打开新窗口不被拦截
+function newWin(url, id) {
+    var a = document.createElement('a');
+    a.setAttribute('href', url);
+    a.setAttribute('target', '_blank');
+    a.setAttribute('id', id);
+    // 防止反复添加
+    if(!document.getElementById(id)) {
+        document.body.appendChild(a);
+    }
+    a.click();
+}
 
 // 来自: https://greasyfork.org/zh-CN/scripts/371938
 function toPDF() {
